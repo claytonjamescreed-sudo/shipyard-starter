@@ -1,0 +1,99 @@
+# Deploys the app to Shipyard on every push to the default branch.
+# Shipyard sets the SHIPYARD_API_URL repo variable when you link this repo
+# on the project page (and the VITE_SUPABASE_* variables once the app has a
+# database). Until then, this workflow does nothing.
+#
+# Works for the Shipyard starter (npm, dist/) and Lovable apps (bun, .output/).
+# Actions are pinned to exact commits.
+name: Deploy to Shipyard
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shipyard-deploy
+  cancel-in-progress: false
+
+jobs:
+  # Installs and builds with no way to deploy: package install and build
+  # scripts never see a GitHub sign-in token.
+  build:
+    if: ${{ vars.SHIPYARD_API_URL != '' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: ${{ hashFiles('bun.lock', 'bun.lockb') != '' }}
+      - name: Install and build
+        shell: bash
+        env:
+          SHIPYARD_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          SHIPYARD_SUPABASE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          SHIPYARD_SUPABASE_REF: ${{ vars.VITE_SUPABASE_PROJECT_ID }}
+          SHIPYARD_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+        run: |
+          # The app's database, when Shipyard set one up. These override any .env file.
+          if [ -n "$SHIPYARD_SUPABASE_URL" ]; then
+            export VITE_SUPABASE_URL="$SHIPYARD_SUPABASE_URL"
+            export VITE_SUPABASE_PUBLISHABLE_KEY="$SHIPYARD_SUPABASE_KEY"
+            export VITE_SUPABASE_PROJECT_ID="$SHIPYARD_SUPABASE_REF"
+          fi
+          # Error tracking with the owner's Sentry, when it is set up.
+          if [ -n "$SHIPYARD_SENTRY_DSN" ]; then export VITE_SENTRY_DSN="$SHIPYARD_SENTRY_DSN"; fi
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun install --frozen-lockfile
+            bun run build
+          else
+            npm ci
+            npm run build
+          fi
+      # Only the built app. The ship script and migrations are taken from the
+      # repo in the deploy job, so nothing a build step wrote can run there.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shipyard-build
+          # .output (Nitro builds) is a hidden folder; dotfiles inside are left out.
+          include-hidden-files: true
+          path: |
+            dist/
+            .output/
+            !dist/**/.*
+            !.output/**/.*
+          retention-days: 1
+
+  # Uploads the build. Only this job can get the sign-in token that proves to
+  # Shipyard which repo and commit it is for, and it runs only code from the
+  # commit itself. No Shipyard secret is stored in the repo.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: shipyard-build
+          path: shipyard-build
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - run: node scripts/ship.mjs --github
+        env:
+          SHIPYARD_API_URL: ${{ vars.SHIPYARD_API_URL }}
+          SHIPYARD_BUILD_DIR: shipyard-build
+          SHIPYARD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}

@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Public URL of the app (Shipyard sets this on deploy).
+SITE_URL=http://localhost:5181
+# Backend. Leave empty for a plain website with no database.
+# For local Supabase, run `npx supabase start` and copy the values it prints.
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
