@@ -5,3 +5,6 @@ SITE_URL=http://localhost:5181
 # For local Supabase, run `npx supabase start` and copy the values it prints.
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
+# The support page (Shipyard sets it on deploy while the owner has it on).
+# Set it to any address to see the footer's Support link locally.
+SHIPYARD_SUPPORT_URL=

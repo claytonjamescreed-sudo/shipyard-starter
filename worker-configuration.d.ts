@@ -5,6 +5,7 @@ interface __BaseEnv_Env {
 	SITE_URL: string;
 	SUPABASE_URL: string;
 	SUPABASE_ANON_KEY: string;
+	SHIPYARD_SUPPORT_URL: string;
 }
 declare namespace Cloudflare {
 	interface Env extends __BaseEnv_Env {}
@@ -14,7 +15,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SITE_URL" | "SUPABASE_URL" | "SUPABASE_ANON_KEY">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SITE_URL" | "SUPABASE_URL" | "SUPABASE_ANON_KEY" | "SHIPYARD_SUPPORT_URL">> {}
 }
 declare module "*.txt" {
 	const value: string;

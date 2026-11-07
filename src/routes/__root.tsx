@@ -2,13 +2,14 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import Footer from '../components/Footer'
 import Header from '../components/Header'
 import { seo } from '../lib/seo'
-import { getSiteUrl } from '../lib/site.functions'
+import { getSiteSettings } from '../lib/site.functions'
 
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
-  // Every route can read context.siteUrl for canonical links.
-  beforeLoad: async () => ({ siteUrl: await getSiteUrl() }),
+  // Every route can read context.siteUrl for canonical links, and
+  // context.supportUrl (null unless the support page is on).
+  beforeLoad: async () => await getSiteSettings(),
   head: ({ match }) => {
     const defaults = seo({}, match.context.siteUrl)
     return {
@@ -24,6 +25,7 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const { supportUrl } = Route.useRouteContext()
   return (
     <html lang="en">
       <head>
@@ -32,7 +34,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body className="font-sans antialiased">
         <Header />
         {children}
-        <Footer />
+        <Footer supportUrl={supportUrl} />
         <Scripts />
       </body>
     </html>
