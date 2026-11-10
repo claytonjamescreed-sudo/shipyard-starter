@@ -9,11 +9,17 @@ The easiest way: create a project in the Shipyard dashboard and paste the comman
 By hand:
 
 ```bash
+# Once per computer: connect Claude Code to Shipyard (your browser opens; click Allow)
+claude mcp add --transport http --scope user shipyard https://shipyard-mcp.claytonjamescreed.workers.dev/mcp
+claude mcp login shipyard
+
 git clone --depth 1 https://github.com/claytonjamescreed-sudo/shipyard-starter.git my-app
 cd my-app && rm -rf .git && git init -q && npm install
-export SHIPYARD_TOKEN=...   # from the Tokens page in the Shipyard dashboard
+echo '{ "project": "my-app" }' > shipyard.json   # your Shipyard project's slug
 claude
 ```
+
+There is no token to copy: Claude Code signs in to Shipyard in the browser, and the Tokens page in the dashboard lists each sign-in so you can disconnect it.
 
 ## Commands
 
@@ -32,5 +38,6 @@ Local settings live in `.dev.vars` (copy `.dev.vars.example`). Never commit `.de
 - Supabase on the server only (`src/lib/supabase.server.ts`), when the project has a database.
 - Error tracking with your own Sentry (`src/server.ts`, `src/start.ts`, `src/lib/error-tracking.ts`), on when Shipyard sets a DSN and off otherwise.
 - `scripts/ship.mjs` and `.github/workflows/shipyard-deploy.yml` for deploys from Claude Code and pushes to GitHub.
+- `.github/workflows/shipyard-autofix.yml`: Auto-fix, when the owner turns it on in Shipyard (Claude opens a fix pull request for a new server error, on the owner's own Claude plan).
 
 `CLAUDE.md` has the rules Claude Code follows in this app.

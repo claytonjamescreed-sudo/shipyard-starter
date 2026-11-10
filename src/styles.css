@@ -462,3 +462,56 @@ a {
   }
 }
 
+
+/* The Update now notice (src/components/UpdateNotice.tsx). */
+.update-notice-region {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 50;
+  max-width: calc(100vw - 2rem);
+}
+.update-notice {
+  position: relative;
+  width: 18rem;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 32px rgba(10, 20, 24, 0.18);
+  padding: 1rem 2.5rem 1rem 1rem;
+  backdrop-filter: blur(8px);
+  animation: rise-in 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.update-notice-button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--sea-ink);
+  color: var(--foam);
+  font-weight: 700;
+  font-size: 0.875rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+.update-notice-button:focus-visible,
+.update-notice-close:focus-visible {
+  outline: 2px solid var(--lagoon-deep);
+  outline-offset: 2px;
+}
+.update-notice-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--sea-ink-soft);
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-notice {
+    animation: none;
+  }
+}

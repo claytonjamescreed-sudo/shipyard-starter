@@ -1,20 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { siteUrl } from '../lib/site-url.server'
+import { robotsTxt } from '../lib/ai-crawlers'
+import { aiCrawlerChoice, siteUrl } from '../lib/site-url.server'
 
-// Search engines and AI crawlers are welcome by default. Block private
-// paths here, and mark private pages with seo({ noIndex: true }).
+// Search engines are welcome. Which AI crawlers are follows the owner's
+// choice in the Shipyard dashboard (src/lib/ai-crawlers.ts). Block private
+// paths there, and mark private pages with seo({ noIndex: true }).
 export const Route = createFileRoute('/robots.txt')({
   server: {
     handlers: {
-      GET: () => {
-        const body = ['User-agent: *', 'Allow: /', '', `Sitemap: ${siteUrl()}/sitemap.xml`, ''].join('\n')
-        return new Response(body, {
+      GET: () =>
+        new Response(robotsTxt(aiCrawlerChoice(), `${siteUrl()}/sitemap.xml`), {
           headers: {
             'Content-Type': 'text/plain; charset=utf-8',
             'Cache-Control': 'public, max-age=3600',
           },
-        })
-      },
+        }),
     },
   },
 })

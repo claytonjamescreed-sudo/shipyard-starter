@@ -8,3 +8,17 @@ SUPABASE_ANON_KEY=
 # The support page (Shipyard sets it on deploy while the owner has it on).
 # Set it to any address to see the footer's Support link locally.
 SHIPYARD_SUPPORT_URL=
+# Visitor analytics (Shipyard sets it on deploy while it is on): JSON from
+# each hostname to its Cloudflare Web Analytics beacon token. Leave empty
+# locally, so local visits are never counted.
+SHIPYARD_ANALYTICS=
+# Which AI crawlers robots.txt allows: allow_all (the default), search_only
+# (AI search, not AI training), or block_all. Shipyard sets it on deploy from
+# the owner's choice on the project's SEO & AI search page.
+SHIPYARD_AI_CRAWLERS=
+# This version and the Update now notice (Shipyard sets it on every deploy):
+# JSON {"version", "build", "notice"}. Leave empty locally: the notice is off.
+SHIPYARD_RELEASE=
+# The What's new page (Shipyard sets it on deploy while the owner has it on):
+# JSON {"hidden": [versions]}. Set it to {"hidden":[]} to see the page locally.
+SHIPYARD_WHATS_NEW=

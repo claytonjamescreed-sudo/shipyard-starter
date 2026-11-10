@@ -15,9 +15,12 @@
 //   .output/server + .output/public   (Nitro: Lovable apps)
 // plus the app's database migrations (supabase/migrations, or
 // drizzle/migrations with its journal), which Shipyard runs before the new
-// code goes live. It never sends dotfiles (dist/server/.dev.vars holds local
-// secrets) or source maps. Shipyard checks everything again; the checks here
-// only fail early.
+// code goes live, and the list of packages in the lockfile (names and
+// versions only), which Shipyard checks for known problems, and the app's
+// version: package.json's "version" and its CHANGELOG.md entry, read from
+// the commit (in GitHub Actions, the checkout), never from the build. It
+// never sends dotfiles (dist/server/.dev.vars holds local secrets) or source
+// maps. Shipyard checks everything again; the checks here only fail early.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -26,7 +29,14 @@ import { dirname, join, resolve, sep } from 'node:path'
 // Shipyard's limit (packages/core BUNDLE_LIMITS.maxTotalBytes).
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024
 const MODULE_EXTENSIONS = new Set(['js', 'mjs', 'wasm'])
+// Shipyard's limit (packages/core DEPENDENCY_LIMITS.maxPackages).
+const MAX_PACKAGES = 5000
 const BUILD_CONFIGS = ['dist/server/wrangler.json', '.output/server/wrangler.json']
+// Shipyard's limit (packages/core RELEASE_NOTES_LIMITS.sourceBytes).
+const MAX_NOTES_BYTES = 16 * 1024
+// A semantic version (packages/core APP_VERSION_PATTERN).
+const SEMVER =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
 // Where the build is. In GitHub Actions it arrives as an artifact, while this
 // script and the migrations come from the commit itself.
 const BUILD_DIR = resolve(process.env.SHIPYARD_BUILD_DIR || '.')
@@ -117,6 +127,140 @@ function readMigrations() {
   return null
 }
 
+// The packages in the app's lockfile, for Shipyard's security checks. Read
+// from the working folder (in GitHub Actions, the commit itself), never from
+// the build. package-lock.json and bun.lock are read; for other lockfiles
+// only the name is sent, and Shipyard says it cannot check them.
+function readDependencies() {
+  const found = ['package-lock.json', 'bun.lock', 'bun.lockb', 'pnpm-lock.yaml', 'yarn.lock'].find((f) => existsSync(resolve(f)))
+  if (!found) return { lockfile: null, packages: [], truncated: false }
+  let packages = []
+  try {
+    if (found === 'package-lock.json') packages = npmLockPackages(JSON.parse(readFileSync(resolve(found), 'utf8')))
+    if (found === 'bun.lock') packages = bunLockPackages(readFileSync(resolve(found), 'utf8'))
+  } catch {
+    console.warn(`ship: could not read ${found}; Shipyard will not check its packages this time.`)
+    return null
+  }
+  const seen = new Map()
+  for (const p of packages) {
+    const key = `${p.name}@${p.version}`
+    const existing = seen.get(key)
+    if (existing) existing.dev = existing.dev && p.dev
+    else seen.set(key, { ...p })
+  }
+  const list = [...seen.values()]
+  return { lockfile: found, packages: list.slice(0, MAX_PACKAGES), truncated: list.length > MAX_PACKAGES }
+}
+
+const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/i
+const NPM_VERSION = /^[0-9][0-9A-Za-z.+_-]{0,63}$/
+const isPackage = (name, version) => typeof name === 'string' && name.length <= 214 && NPM_NAME.test(name) && typeof version === 'string' && NPM_VERSION.test(version)
+
+// package-lock.json, lockfile versions 1 to 3.
+function npmLockPackages(lock) {
+  const out = []
+  for (const [path, info] of Object.entries(lock.packages ?? {})) {
+    const at = path.lastIndexOf('node_modules/')
+    if (at === -1 || info.link) continue
+    const name = info.name ?? path.slice(at + 'node_modules/'.length)
+    if (isPackage(name, info.version)) out.push({ name, version: info.version, dev: Boolean(info.dev || info.devOptional) })
+  }
+  if (!Object.keys(lock.packages ?? {}).length) {
+    const walk = (deps) => {
+      for (const [name, info] of Object.entries(deps ?? {})) {
+        if (isPackage(name, info.version)) out.push({ name, version: info.version, dev: Boolean(info.dev) })
+        walk(info.dependencies)
+      }
+    }
+    walk(lock.dependencies)
+  }
+  return out
+}
+
+// bun.lock (Bun's text lockfile: JSON with trailing commas). A package is
+// a build tool (dev) when nothing the app runs depends on it.
+function bunLockPackages(text) {
+  const lock = JSON.parse(text.replace(/,(\s*[}\]])/g, '$1'))
+  const entries = lock.packages ?? {}
+  const root = lock.workspaces?.[''] ?? {}
+  const depsOf = (info) => ({ ...(info?.dependencies ?? {}), ...(info?.optionalDependencies ?? {}), ...(info?.peerDependencies ?? {}) })
+  // Bun keys a nested copy as "parent/child"; look it up from the inside out.
+  const resolveKey = (from, name) => {
+    const parts = from ? from.split('/') : []
+    for (let i = parts.length; i >= 0; i--) {
+      const key = [...parts.slice(0, i), name].join('/')
+      if (entries[key]) return key
+    }
+    return null
+  }
+  const runtime = new Set()
+  const queue = Object.keys(depsOf(root)).map((name) => resolveKey('', name)).filter(Boolean)
+  while (queue.length) {
+    const key = queue.pop()
+    if (runtime.has(key)) continue
+    runtime.add(key)
+    const info = Array.isArray(entries[key]) ? entries[key][2] : null
+    for (const name of Object.keys(depsOf(info))) {
+      const child = resolveKey(key, name)
+      if (child && !runtime.has(child)) queue.push(child)
+    }
+  }
+  const out = []
+  for (const [key, entry] of Object.entries(entries)) {
+    const spec = Array.isArray(entry) ? entry[0] : null
+    if (typeof spec !== 'string') continue
+    const at = spec.lastIndexOf('@')
+    if (at <= 0) continue
+    const name = spec.slice(0, at)
+    const version = spec.slice(at + 1)
+    if (isPackage(name, version)) out.push({ name, version, dev: !runtime.has(key) })
+  }
+  return out
+}
+
+// The app's version: package.json's "version" (semver), and the CHANGELOG.md
+// section for it (its "## [1.2.0]" or "## 1.2.0" heading, up to the next
+// "## " heading). Read from the working folder, which in GitHub Actions is
+// the commit itself. "0.0.0" is the placeholder many templates start with,
+// so it counts as no version.
+function readRelease() {
+  let version = null
+  try {
+    const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+    version = typeof pkg.version === 'string' ? pkg.version.trim() : null
+  } catch {
+    return null
+  }
+  if (!version || version === '0.0.0') return null
+  if (version.length > 64 || !SEMVER.test(version)) {
+    console.warn(`ship: package.json's version "${version.slice(0, 64)}" is not a semantic version (like 1.2.0), so this deploy is shown by its commit.`)
+    return null
+  }
+  const file = ['CHANGELOG.md', 'changelog.md'].find((f) => existsSync(resolve(f)))
+  const notes = file ? changelogSection(readFileSync(resolve(file), 'utf8'), version) : null
+  return { version, notes: notes ? Buffer.from(notes).subarray(0, MAX_NOTES_BYTES - 4).toString('utf8') : null }
+}
+
+function headingVersion(line) {
+  const heading = /^##\s+(.*)$/.exec(line.trim())
+  if (!heading) return null
+  const match = /^\[?v?([0-9A-Za-z.+-]+)\]?(?:\s|$)/.exec(heading[1].trim())
+  return match ? match[1] : null
+}
+
+function changelogSection(markdown, version) {
+  const lines = markdown.replace(/\r\n?/g, '\n').split('\n')
+  const start = lines.findIndex((line) => headingVersion(line) === version)
+  if (start === -1) return null
+  const out = []
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,2}\s/.test(line.trim())) break
+    out.push(line)
+  }
+  return out.join('\n').trim() || null
+}
+
 function readBuild() {
   const configPath = findBuildConfig()
   const serverDir = dirname(configPath)
@@ -154,6 +298,8 @@ function readBuild() {
       assets_headers: rules('_headers'),
       assets_redirects: rules('_redirects'),
       commit: commitInfo(),
+      dependencies: readDependencies(),
+      release: readRelease(),
     },
     modules,
     assets,
@@ -206,7 +352,7 @@ async function githubUploadLink(commitMessage) {
   })
   const body = await readJson(response)
   if (!response.ok) fail(body.error ?? `Shipyard refused the deploy (${response.status}).`)
-  console.log(`Deploying ${body.project}, version ${body.deploy.version}.`)
+  console.log(`Deploying ${body.project} (deploy ${body.deploy.version}).`)
   return body.upload_url
 }
 
@@ -231,7 +377,26 @@ async function upload(link, form, total) {
         : `Database migrations: none new (${body.migrations.already_applied} already applied).`,
     )
   }
-  console.log(`\nLive: ${body.url} (version ${body.deploy.version})`)
+  if (body.preview_url) {
+    const waiting = body.pending_migrations ?? []
+    if (waiting.length) {
+      console.log(`Database migrations waiting for the promote: ${waiting.join(', ')}`)
+      console.log('  They run on the live database when the preview is promoted, so pages that need them will not work in the preview.')
+    }
+    console.log(`\nPreview: ${body.preview_url} (${versionText(body)})`)
+    console.log('Not live yet. Share the link; promote it in the Shipyard dashboard (Live app) or ask Claude Code to promote it.')
+    if (body.release?.hint) console.log(`\n${body.release.hint}`)
+    return
+  }
+  console.log(`\nLive: ${body.url} (${versionText(body)})`)
+  if (body.security?.summary) console.log(body.security.summary)
+  if (body.seo?.summary) console.log(body.seo.summary)
+  if (body.release?.hint) console.log(`\n${body.release.hint}`)
+}
+
+// "version 1.2.0, deploy 14"; older Shipyard servers send only the deploy number.
+function versionText(body) {
+  return body.release?.version ? `version ${body.release.version}, deploy ${body.deploy.version}` : `deploy ${body.deploy.version}`
 }
 
 const args = process.argv.slice(2)
@@ -242,6 +407,13 @@ console.log(
     (bundle.migrations.length ? `, ${bundle.manifest.migrations.files.length} migration files (${bundle.manifest.migrations.kind})` : '') +
     (bundle.manifest.commit?.dirty ? ' (with uncommitted changes)' : ''),
 )
+const release = bundle.manifest.release
+if (release) {
+  console.log(`Version ${release.version}` + (release.notes ? ' (with its CHANGELOG.md entry)' : ''))
+  if (!release.notes) console.log(`  CHANGELOG.md has no entry for ${release.version}, so the What's new page will leave it out.`)
+} else {
+  console.log('No version in package.json: Shipyard shows this deploy by its commit.')
+}
 
 if (args[0] === '--github') {
   await upload(await githubUploadLink(bundle.manifest.commit?.message ?? null), form, total)

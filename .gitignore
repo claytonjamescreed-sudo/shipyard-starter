@@ -6,3 +6,5 @@ dist/
 !.dev.vars.example
 .env
 .DS_Store
+# Claude Code: personal settings and the error hook's cursor
+.claude/*.local.json

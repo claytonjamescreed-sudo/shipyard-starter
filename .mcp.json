@@ -2,10 +2,7 @@
   "mcpServers": {
     "shipyard": {
       "type": "http",
-      "url": "${SHIPYARD_MCP_URL:-https://shipyard-mcp.claytonjamescreed.workers.dev/mcp}",
-      "headers": {
-        "Authorization": "Bearer ${SHIPYARD_TOKEN}"
-      }
+      "url": "${SHIPYARD_MCP_URL:-https://shipyard-mcp.claytonjamescreed.workers.dev/mcp}"
     }
   }
 }
