@@ -1,0 +1,16 @@
+{
+  "project": "",
+  "brand": {
+    "accent": "#328f97",
+    "background": "#e7f3ec",
+    "text": "#173a40",
+    "surface": "#ffffff",
+    "font": "Manrope",
+    "dark": {
+      "accent": "#60d7cf",
+      "background": "#0a1418",
+      "text": "#d7ece8",
+      "surface": "#101d22"
+    }
+  }
+}

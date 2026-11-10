@@ -242,6 +242,36 @@ function readRelease() {
   return { version, notes: notes ? Buffer.from(notes).subarray(0, MAX_NOTES_BYTES - 4).toString('utf8') : null }
 }
 
+// The app's look for the pages Shipyard hosts for it (the support page):
+// shipyard.json's "brand" block, read from the working folder (in GitHub
+// Actions, the commit). Shipyard checks it again and leaves out anything
+// that does not pass; this only warns early. See CLAUDE.md, "Brand".
+function readBrand() {
+  let brand
+  try {
+    brand = JSON.parse(readFileSync(resolve('shipyard.json'), 'utf8')).brand
+  } catch {
+    return null
+  }
+  if (brand == null) return null
+  if (typeof brand !== 'object' || Array.isArray(brand) || JSON.stringify(brand).length > 2000) {
+    console.warn('ship: shipyard.json\'s "brand" must be a small object; it was not sent.')
+    return null
+  }
+  const hex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+  const colors = [['', brand], ...(brand.dark && typeof brand.dark === 'object' ? [['dark.', brand.dark]] : [])]
+  for (const [where, set] of colors) {
+    for (const key of ['accent', 'background', 'text', 'surface']) {
+      if (set[key] !== undefined && !hex.test(String(set[key]))) console.warn(`ship: brand.${where}${key} must be a hex color like "#1f6f8b"; Shipyard leaves it out.`)
+    }
+  }
+  if (!hex.test(String(brand.accent ?? ''))) console.warn('ship: brand.accent is missing or not a hex color, so the support page uses the build\'s icon and theme color instead.')
+  if (brand.logo !== undefined && !/^\/(?!\/)[A-Za-z0-9._~/-]{1,200}\.(svg|png|webp|ico|jpg|jpeg|gif)$/i.test(String(brand.logo))) {
+    console.warn('ship: brand.logo must be an image path in the app, like "/favicon.svg"; Shipyard leaves it out.')
+  }
+  return brand
+}
+
 function headingVersion(line) {
   const heading = /^##\s+(.*)$/.exec(line.trim())
   if (!heading) return null
@@ -300,6 +330,7 @@ function readBuild() {
       commit: commitInfo(),
       dependencies: readDependencies(),
       release: readRelease(),
+      brand: readBrand(),
     },
     modules,
     assets,
